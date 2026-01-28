@@ -1454,3 +1454,305 @@ python agent.py
 
 ---
 
+_**User (2026-01-27 23:37Z)**_
+
+We are now going to create a first tool. Create a tool folder and store tools inside of the folder.
+
+The first tool is called answer_book_question
+
+The tool allows the agent to answer specific questions about any book inside of the @storedata.json . 
+
+For now, DO NOT create the retrieval code. 
+
+Simply create the definition of the tool.
+
+Add it to the agent
+
+And make it possible for the agent to specify when it would use that tool to answer a user question.
+
+<Scenario>
+
+User
+Do you have the book The Correspondent by Virginia Evans? 
+And how much does the book cost? 
+
+Agent:
+Yes! We have this book in stock! This is a great book of Literary Fiction released in 2025. It is currently selling for $26.10. 
+
+[I used the answer_book_question tool]
+
+</Scenario>
+
+For now - don't worry about the tool logic.
+
+JUST provide me with confirmation that the tool call was made.
+
+---
+
+_**Agent (model gemini-3-pro-preview, mode Agent)**_
+
+<tool-use data-tool-type="shell" data-tool-name="run_terminal_cmd">
+<details><summary>Tool use: **run_terminal_cmd** • Run command: mkdir tools</summary>
+
+```bash
+mkdir tools
+```
+</details>
+</tool-use>
+
+---
+
+<tool-use data-tool-type="write" data-tool-name="write">
+
+<details><summary>Tool use: **write** • Edit file: tools/book_tools.py</summary>
+
+**Chunk 1**
+Lines added: 12, lines removed: 1
+
+```diff
+@@ -1,1 +1,12 @@
+- 
++ from langchain.tools import tool
++ 
++ @tool
++ def answer_book_question(question: str) -&gt; str:
++     """
++     Useful for answering specific questions about a book, such as price, author, genre, or availability.
++     Input should be the specific question about the book.
++     """
++     # Placeholder logic
++     print(f"DEBUG: answer_book_question tool called with question: {question}")
++     return "Tool 'answer_book_question' was called successfully. (Real data retrieval is not implemented yet)."
++ 
+```
+
+</details>
+
+</tool-use>
+
+---
+
+<tool-use data-tool-type="write" data-tool-name="write">
+
+<details><summary>Tool use: **write** • Edit file: tools/__init__.py</summary>
+
+</details>
+
+</tool-use>
+
+---
+
+<tool-use data-tool-type="read" data-tool-name="read_file">
+<details><summary>Tool use: **read_file** • Read file: agent.py</summary>
+
+</details>
+</tool-use>
+
+---
+
+<tool-use data-tool-type="write" data-tool-name="write">
+
+<details><summary>Tool use: **write** • Edit file: agent.py</summary>
+
+**Chunk 1**
+Lines added: 1, lines removed: undefined
+
+```diff
+@@ -3,4 +3,5 @@
+  from dotenv import load_dotenv
+  from langchain.agents import create_agent
++ from tools.book_tools import answer_book_question
+  
+  # Load environment variables
+```
+
+**Chunk 2**
+Lines added: 4, lines removed: 1
+
+```diff
+@@ -21,7 +22,10 @@
+              "that you cannot answer the question."
+          )
++         
++         tools = [answer_book_question]
++         
+          agent = create_agent(
+              model="gpt-4o-mini",
+-             tools=[], # No tools for now
++             tools=tools,
+              system_prompt=system_prompt
+          )
+```
+
+**Chunk 3**
+Lines added: 11, lines removed: 1
+
+```diff
+@@ -48,5 +52,15 @@
+                  "messages": [{"role": "user", "content": user_input}]
+              })
+-             
++             
++             # Check for tool calls in the conversation history of this turn
++             # result["messages"] contains the full history. We want to see if any tools were called in the recent turn.
++             # A simple way is to check if any message in the result is a ToolMessage or AIMessage with tool_calls
++             
++             # For debugging/confirmation purposes, let's print if a tool was used.
++             for msg in result["messages"]:
++                 if hasattr(msg, 'tool_calls') and msg.tool_calls:
++                     for tool_call in msg.tool_calls:
++                         print(f"[I used the {tool_call['name']} tool]")
++ 
+              # The result contains the full state, including the conversation history.
+              # We extract the last message, which is the agent's response.
+```
+
+</details>
+
+</tool-use>
+
+---
+
+I have implemented the `answer_book_question` tool and added it to the agent. I also updated `agent.py` to print a confirmation message `[I used the answer_book_question tool]` whenever the tool is called, matching your requested scenario.
+
+You can now run the agent and test it:
+
+```bash
+python agent.py
+```
+
+Try asking: "Do you have the book The Correspondent by Virginia Evans? And how much does the book cost?"
+
+---
+
+_**User (2026-01-27 23:37Z)**_
+
+Now let's proceed to add the functionality to the tool.
+
+The tool should allow the user to ask about any field associated with an individual book
+
+Here is an example book data set.
+@storedata.json (3-15) 
+
+
+
+---
+
+_**Agent (model gemini-3-pro-preview, mode Agent)**_
+
+<tool-use data-tool-type="write" data-tool-name="write">
+
+<details><summary>Tool use: **write** • Edit file: tools/book_tools.py</summary>
+
+**Chunk 1**
+Lines added: 60, lines removed: 7
+
+```diff
+@@ -1,12 +1,65 @@
++ import json
++ import os
+  from langchain.tools import tool
+  
++ def load_store_data():
++     # Get the directory of the current file
++     current_dir = os.path.dirname(os.path.abspath(__file__))
++     # Go up one level to root
++     root_dir = os.path.dirname(current_dir)
++     data_path = os.path.join(root_dir, 'storedata.json')
++     
++     try:
++         with open(data_path, 'r', encoding='utf-8') as f:
++             return json.load(f)
++     except Exception as e:
++         return {"books": []}
++ 
+  @tool
+- def answer_book_question(question: str) -&gt; str:
++ def answer_book_question(query: str) -&gt; str:
+      """
+-     Useful for answering specific questions about a book, such as price, author, genre, or availability.
+-     Input should be the specific question about the book.
+-     """
+-     # Placeholder logic
+-     print(f"DEBUG: answer_book_question tool called with question: {question}")
+-     return "Tool 'answer_book_question' was called successfully. (Real data retrieval is not implemented yet)."
++     Useful for answering specific questions about a book. 
++     Input should be the title of the book or the author's name.
++     """
++     data = load_store_data()
++     books = data.get("books", [])
++     
++     query_lower = query.lower().strip()
++     found_books = []
++     
++     # First pass: Exact title match (case-insensitive)
++     for book in books:
++         if book['title'].lower() == query_lower:
++             found_books.append(book)
++             
++     # Second pass: Title contained in query (if query is longer, e.g. "The Correspondent by Virginia Evans")
++     # OR Query contained in title (partial match)
++     if not found_books:
++         for book in books:
++             book_title_lower = book['title'].lower()
++             # Check if book title is inside the query (e.g. query="price of The Hobbit")
++             if book_title_lower in query_lower and len(book_title_lower) &gt; 3:
++                 found_books.append(book)
++             # Check if query is inside book title (e.g. query="Harry Potter")
++             elif query_lower in book_title_lower and len(query_lower) &gt; 3:
++                 found_books.append(book)
++                 
++     # Third pass: Author match
++     if not found_books:
++         for book in books:
++             if query_lower in book['author'].lower():
++                 found_books.append(book)
++ 
++     if not found_books:
++         return "I could not find any book matching that title or author in our store."
++         
++     # Remove duplicates if any (based on id)
++     seen_ids = set()
++     unique_books = []
++     for b in found_books:
++         if b['id'] not in seen_ids:
++             unique_books.append(b)
++             seen_ids.add(b['id'])
++ 
++     return json.dumps(unique_books)
+  
+```
+
+</details>
+
+</tool-use>
+
+---
+
+I have updated `tools/book_tools.py` with the logic to load `storedata.json` and search for books based on the query. The tool now returns the JSON details of the found books, which the agent can use to answer specific questions.
+
+You can run the agent to test it:
+
+```bash
+python agent.py
+```
+
+Try asking: "Do you have the book The Correspondent by Virginia Evans? And how much does the book cost?"
+
+---
+
+_**User (2026-01-27 23:37Z)**_
+
+We want the agent to know to call the tool multiple times if the user supplies mutliple books or questions about multiple books.
+
+See this example:
+@storedata.json (3-15) 
+
+---
+
+_**Agent (model gemini-3-pro-preview, mode Agent)**_
+
+
+
+---
+
