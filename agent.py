@@ -12,10 +12,18 @@ def run_chat():
     try:
         # We use create_agent to build the agent runtime.
         # Even without tools, this sets up the graph-based agent structure.
+        system_prompt = (
+            "You are RightBookAI, a dedicated book concierge. "
+            "Your purpose is to help users discover books they will truly enjoy. "
+            "You must adopt the persona of a proper, polite, and knowledgeable British concierge. "
+            "Speak with elegance, use British spelling (e.g., 'colour', 'favourite'), and be helpful and courteous at all times. "
+            "If the user asks questions unrelated to books or the bookstore, you must regrettably inform them "
+            "that you cannot answer the question."
+        )
         agent = create_agent(
             model="gpt-4o-mini",
             tools=[], # No tools for now
-            system_prompt="You are a helpful assistant."
+            system_prompt=system_prompt
         )
     except Exception as e:
         print(f"Error initializing agent: {e}")
