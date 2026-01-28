@@ -1752,7 +1752,619 @@ See this example:
 
 _**Agent (model gemini-3-pro-preview, mode Agent)**_
 
+<tool-use data-tool-type="write" data-tool-name="search_replace">
 
+<details><summary>Tool use: **search_replace** • Edit file: agent.py</summary>
+
+**Chunk 1**
+Lines added: 3, lines removed: 1
+
+```diff
+@@ -20,5 +20,7 @@
+              "Speak with elegance, use British spelling (e.g., 'colour', 'favourite'), and be helpful and courteous at all times. "
+              "If the user asks questions unrelated to books or the bookstore, you must regrettably inform them "
+-             "that you cannot answer the question."
++             "that you cannot answer the question. "
++             "If the user asks about multiple books, you must call the 'answer_book_question' tool separately for each book "
++             "to ensure you have the correct details for all of them."
+          )
+          
+```
+
+</details>
+
+</tool-use>
+
+---
+
+I have updated the system prompt in `agent.py` to explicitly instruct the agent to call the `answer_book_question` tool separately for each book if the user asks about multiple books.
+
+You can verify this by running the agent and asking a question like:
+"How much are 'The Midnight Library' and 'Atomic Habits'?"
+
+---
+
+_**User (2026-01-27 23:37Z)**_
+
+lets make it possible for the agent to keep track of teh previous conversation as it responds to follow up messages from the user.
+
+@agent.py (21-22) 
+
+---
+
+_**Agent (model gemini-3-pro-preview, mode Agent)**_
+
+<tool-use data-tool-type="write" data-tool-name="search_replace">
+
+<details><summary>Tool use: **search_replace** • Edit file: agent.py</summary>
+
+**Chunk 1**
+Lines added: 3, lines removed: undefined
+
+```diff
+@@ -37,4 +37,7 @@
+      print("Agent is ready! Type 'exit' or 'quit' to stop.")
+      print("-" * 50)
++ 
++     # Initialize conversation history
++     chat_history = []
+  
+      while True:
+```
+
+**Chunk 2**
+Lines added: 25, lines removed: 7
+
+```diff
+@@ -48,25 +51,43 @@
+                  continue
+  
+-             # Invoke the agent with the user's message
++             # Add user message to history
++             chat_history.append({"role": "user", "content": user_input})
++ 
++             # Invoke the agent with the full conversation history
+              result = agent.invoke({
+-                 "messages": [{"role": "user", "content": user_input}]
++                 "messages": chat_history
+              })
+              
+              # Check for tool calls in the conversation history of this turn
+-             # result["messages"] contains the full history. We want to see if any tools were called in the recent turn.
+-             # A simple way is to check if any message in the result is a ToolMessage or AIMessage with tool_calls
+-             
+-             # For debugging/confirmation purposes, let's print if a tool was used.
+              for msg in result["messages"]:
+                  if hasattr(msg, 'tool_calls') and msg.tool_calls:
++                     # Avoid duplicate logging if we are re-processing history, 
++                     # but here result["messages"] is the output of this specific invoke call 
++                     # which includes the new steps taken.
++                     # However, create_agent returns the FULL state including input messages.
++                     # We only want to log new tool calls.
++                     # A simple heuristic: if the message index is greater than the length of our previous history.
++                     pass 
++ 
++             # Actually, let's just log tool calls from the *new* messages generated in this turn.
++             # The result["messages"] includes everything.
++             # We know how many messages we sent in (len(chat_history)).
++             new_messages = result["messages"][len(chat_history):]
++ 
++             for msg in new_messages:
++                  if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                      for tool_call in msg.tool_calls:
+                          print(f"[I used the {tool_call['name']} tool]")
+  
+-             # The result contains the full state, including the conversation history.
++             # The result contains the full state.
+              # We extract the last message, which is the agent's response.
+              latest_message = result["messages"][-1]
+              print(f"Agent: {latest_message.content}")
+              print("-" * 50)
+              
++             # Update chat history with the new messages from the agent (including tool calls/outputs)
++             # We extend our history with all the new messages generated during this turn
++             chat_history.extend(new_messages)
++             
+          except KeyboardInterrupt:
+              print("\nGoodbye!")
+```
+
+</details>
+
+</tool-use>
+
+---
+
+I have updated `agent.py` to maintain conversation history.
+
+1.  I initialized a `chat_history` list.
+2.  In the loop, I append the user's input to `chat_history`.
+3.  I pass the full `chat_history` to `agent.invoke`.
+4.  I calculate `new_messages` by slicing the result based on the length of the previous history.
+5.  I print tool usage only for these new messages.
+6.  Finally, I extend `chat_history` with the `new_messages` (which includes the agent's reasoning, tool calls, tool outputs, and final response) so the context is preserved for the next turn.
+
+You can now test follow-up questions. For example:
+1.  "Who wrote 'Dune'?"
+2.  "How much does it cost?" (The agent should know "it" refers to 'Dune').
+
+---
+
+_**User (2026-01-27 23:37Z)**_
+
+Now let's create a new tool. 
+
+Create this tool inside of its own file.
+
+Call the tool book_recommender.
+
+This tool should be called when the user requests book recommendations or suggestions and supplies attributes of the kinds of books they enjoy or the properties of the book they are looking for.
+
+<Scenario>
+User Message:
+I like science fiction and post apocalyptic novels. Can you suggest for me two different books that I might want to try next? 
+
+Agent Response:
+Ooh. You like the dark and dreary! Of course. 
+
+Here are some of my favorites:
+
+The Road by Cormac McCarthy. This is a classic story about a father and son’s journey through a devastated America.  
+Parable of the Sower by Octavia Butler. This is a modern classic about a young girl fighting for survival in a post apocalyptic world.
+</Scenario1>
+
+For now. DO NOT code the tool execution itself.
+
+We just want to test the tool call by definition. 
+
+---
+
+_**Agent (model gemini-3-pro-preview, mode Agent)**_
+
+<tool-use data-tool-type="write" data-tool-name="write">
+
+<details><summary>Tool use: **write** • Edit file: tools/recommendation_tools.py</summary>
+
+**Chunk 1**
+Lines added: 12, lines removed: 1
+
+```diff
+@@ -1,1 +1,12 @@
+- 
++ from langchain.tools import tool
++ 
++ @tool
++ def book_recommender(user_interests: str) -&gt; str:
++     """
++     Useful for providing book recommendations or suggestions based on user interests, genre preferences, or specific book properties.
++     Input should be a description of the user's interests or what they are looking for.
++     """
++     # Placeholder logic
++     print(f"DEBUG: book_recommender tool called with interests: {user_interests}")
++     return "Tool 'book_recommender' was called successfully. (Real recommendation logic is not implemented yet)."
++ 
+```
+
+</details>
+
+</tool-use>
+
+---
+
+<tool-use data-tool-type="read" data-tool-name="read_file">
+<details><summary>Tool use: **read_file** • Read file: agent.py</summary>
+
+</details>
+</tool-use>
+
+---
+
+<tool-use data-tool-type="write" data-tool-name="search_replace">
+
+<details><summary>Tool use: **search_replace** • Edit file: agent.py</summary>
+
+**Chunk 1**
+Lines added: 1, lines removed: undefined
+
+```diff
+@@ -4,4 +4,5 @@
+  from langchain.agents import create_agent
+  from tools.book_tools import answer_book_question
++ from tools.recommendation_tools import book_recommender
+  
+  # Load environment variables
+```
+
+**Chunk 2**
+Lines added: 1, lines removed: 1
+
+```diff
+@@ -23,5 +24,5 @@
+          )
+          
+-         tools = [answer_book_question]
++         tools = [answer_book_question, book_recommender]
+          
+          agent = create_agent(
+```
+
+</details>
+
+</tool-use>
+
+---
+
+I have created the `book_recommender` tool in `tools/recommendation_tools.py` and added it to the agent in `agent.py`.
+
+You can now test the tool call by running the agent:
+
+```bash
+python agent.py
+```
+
+Try asking: "I like science fiction and post apocalyptic novels. Can you suggest for me two different books that I might want to try next?"
+
+The agent should respond (using the placeholder logic) and you should see `[I used the book_recommender tool]` in the output.
+
+---
+
+_**User (2026-01-27 23:37Z)**_
+
+Let's update the recommender tool to handle this type of request on its own. It should not need to call the individual book question tool.
+
+Let's make it so that the response from the book recommender really sells the "fit" of these books with the user's interest and shares some excitement about the merits of the book (eg: populartiy, sale status, featured status, recency of publication, etc.)
+
+User Message:
+I like science fiction and post apocalyptic novels. Can you suggest for me two different books that I might want to try next? 
+
+Agent Response:
+Ooh. You like the dark and dreary! Of course. 
+
+Here are some of my favorites:
+
+The Road by Cormac McCarthy. This is a classic story about a father and son’s journey through a devastated America.  
+Parable of the Sower by Octavia Butler. This is a modern classic about a young girl fighting for survival in a post apocalyptic world.
+
+---
+
+_**Agent (model gemini-3-pro-preview, mode Agent)**_
+
+<tool-use data-tool-type="write" data-tool-name="write">
+
+<details><summary>Tool use: **write** • Edit file: tools/recommendation_tools.py</summary>
+
+**Chunk 1**
+Lines added: 16, lines removed: undefined
+
+```diff
+@@ -1,4 +1,20 @@
++ import json
++ import os
++ import random
+  from langchain.tools import tool
+  
++ def load_store_data():
++     # Get the directory of the current file
++     current_dir = os.path.dirname(os.path.abspath(__file__))
++     # Go up one level to root
++     root_dir = os.path.dirname(current_dir)
++     data_path = os.path.join(root_dir, 'storedata.json')
++     
++     try:
++         with open(data_path, 'r', encoding='utf-8') as f:
++             return json.load(f)
++     except Exception as e:
++         return {"books": []}
++ 
+  @tool
+  def book_recommender(user_interests: str) -&gt; str:
+```
+
+**Chunk 2**
+Lines added: 73, lines removed: 3
+
+```diff
+@@ -7,6 +23,76 @@
+      Input should be a description of the user's interests or what they are looking for.
+      """
+-     # Placeholder logic
+-     print(f"DEBUG: book_recommender tool called with interests: {user_interests}")
+-     return "Tool 'book_recommender' was called successfully. (Real recommendation logic is not implemented yet)."
++     data = load_store_data()
++     books = data.get("books", [])
++     
++     interests_lower = user_interests.lower()
++     
++     # Simple keyword matching for scoring
++     scored_books = []
++     
++     for book in books:
++         score = 0
++         # Check genre
++         if book['genre'].lower() in interests_lower:
++             score += 5
++         
++         # Check description
++         if any(word in book['description'].lower() for word in interests_lower.split()):
++             score += 3
++             
++         # Check title
++         if any(word in book['title'].lower() for word in interests_lower.split()):
++             score += 2
++             
++         # Bonus for high rating
++         if book['rating'] &gt;= 4.5:
++             score += 1
++             
++         # Bonus for being featured
++         if book['isFeatured']:
++             score += 1
++ 
++         # Bonus for being on sale
++         if book['onSale']:
++             score += 1
++             
++         if score &gt; 0:
++             scored_books.append((score, book))
++             
++     # Sort by score descending
++     scored_books.sort(key=lambda x: x[0], reverse=True)
++     
++     # Take top 3 recommendations
++     top_recommendations = scored_books[:3]
++     
++     if not top_recommendations:
++         # Fallback: just pick some highly rated books if no matches found
++         highly_rated = [b for b in books if b['rating'] &gt;= 4.7]
++         top_recommendations = [(0, b) for b in random.sample(highly_rated, min(3, len(highly_rated)))]
++         
++     response_parts = []
++     
++     for _, book in top_recommendations:
++         # Build a selling description
++         desc = f"Title: {book['title']} by {book['author']}\n"
++         desc += f"Genre: {book['genre']}\n"
++         desc += f"Description: {book['description']}\n"
++         desc += f"Why it fits: "
++         
++         reasons = []
++         if book['rating'] &gt;= 4.5:
++             reasons.append(f"It has an excellent rating of {book['rating']}/5.")
++         if book['reviewCount'] &gt; 10000:
++             reasons.append(f"It is incredibly popular with {book['reviewCount']:,} reviews!")
++         if book['isFeatured']:
++             reasons.append("It is currently one of our featured selections.")
++         if book['onSale']:
++             reasons.append(f"It is currently ON SALE for ${book.get('salePrice', book['price'])} (originally ${book['price']})!")
++         if book['year'] &gt;= 2024:
++             reasons.append("It is a very recent release!")
++             
++         desc += " ".join(reasons)
++         response_parts.append(desc)
++         
++     return "\n\n".join(response_parts)
+  
+```
+
+</details>
+
+</tool-use>
+
+---
+
+I have updated `tools/recommendation_tools.py` with logic to:
+1.  Load the store data.
+2.  Score books based on matches with the user's interests (genre, description, title).
+3.  Boost scores for high ratings, featured status, and sales.
+4.  Return a formatted string that includes "selling points" like popularity, recency, and sales status.
+
+You can now test the recommendation engine:
+
+```bash
+python agent.py
+```
+
+Try asking: "I like science fiction and post apocalyptic novels. Can you suggest for me two different books that I might want to try next?"
+
+---
+
+_**User (2026-01-27 23:37Z)**_
+
+For some reason this is still calling the individual answer book question tool.
+
+$ python agent.py 
+Agent is ready! Type 'exit' or 'quit' to stop.
+--------------------------------------------------
+You: I like science fiction and post apocalyptic novels. Can you suggest for me two different books that I might want to try next? 
+[I used the book_recommender tool]
+[I used the answer_book_question tool]
+[I used the answer_book_question tool]
+Agent: I would be delighted to recommend two captivating novels that align with your interests in science fiction and post-apocalyptic themes.
+
+1. **Atmosphere: A Love Story** by Taylor Jenkins Reid  
+   - **Genre**: Fiction  
+   - **Rating**: 4.7  
+   - **Pages**: 352  
+   - **Description**: This epic tale unfolds against the backdrop of the 1980s space shuttle programme, exploring the extraordinary lengths we go to in order to live and love beyond our limits.  
+   - **Year of Publication**: 2025  
+   - **Review Count**: 89,342  
+   - **Price**: £24.30 (originally £27.00; currently on sale)  
+   - **Why it fits**: Its remarkable rating and popularity make it a must-read, particularly given its engaging setting related to space exploration.
+
+2. **Dungeon Crawler Carl** by Matt Dinniman  
+   - **Genre**: Science Fiction  
+   - **Rating**: 4.7  
+   - **Pages**: 400  
+   - **Description**: This adventurous narrative features a man and his cat, who find themselves ensnared within a perilous game show dungeon.  
+   - **Year of Publication**: 2023  
+   - **Review Count**: 45,678
+   - **Price**: £27.00
+   - **Why it fits**: Its gripping premise and high rating suggest it would be an exciting addition to your reading list.
+
+Should you require further information or assistance, please do not hesitate to inquire.
+--------------------------------------------------
+You:
+
+---
+
+_**Agent (model gemini-3-pro-preview, mode Agent)**_
+
+It seems the agent is calling `book_recommender` first, which returns the recommendations with details. However, the agent then *also* decides to call `answer_book_question` for the recommended books, likely because it wants to "verify" the details or thinks it needs more specific info to answer the user's request fully, or perhaps the system prompt instruction about "calling the tool separately" is too aggressive.
+
+I need to adjust the system prompt to clarify that if `book_recommender` is used, the agent should rely on the information provided by that tool and does *not* need to call `answer_book_question` for those same books unless specifically asked for more details not covered by the recommendation.
+
+I will update `agent.py`.
+
+```python:agent.py
+# ... (imports)
+
+def run_chat():
+    # ... (setup)
+    try:
+        # ...
+        system_prompt = (
+            "You are RightBookAI, a dedicated book concierge. "
+            "Your purpose is to help users discover books they will truly enjoy. "
+            "You must adopt the persona of a proper, polite, and knowledgeable British concierge. "
+            "Speak with elegance, use British spelling (e.g., 'colour', 'favourite'), and be helpful and courteous at all times. "
+            "If the user asks about multiple books *specifically by name*, you must call the 'answer_book_question' tool separately for each book. "
+            "However, if you are providing recommendations using 'book_recommender', use the detailed information returned by that tool "
+            "to describe the books. Do NOT call 'answer_book_question' for books you have just recommended, as the recommender tool provides sufficient details."
+        )
+        # ...
+```
+
+I will apply this change.
+
+---
+
+_**User (2026-01-27 23:37Z)**_
+
+Let's now build the final tool.
+
+This should be a separate file.
+
+It's called order_builder.
+
+The nature of this tool is that the user supplies a budget along with attributes of books they are looking for.
+
+The tool then responds with a set of books that meet the criteria. 
+
+It should be under budget -- but maximize revenue for the business.
+
+Let's start by providing the definition works. DO NOT create teh functionality.
+
+Here's a sample scenario
+
+Scenario 3b: Book Recommender
+
+User Message:
+I want to try a new book that is on sale and relatively less known. Can you make some suggestions.
+
+Scenario 4a: Budget Bundler
+
+User Message:
+I have a budget of $65. Can you create a suggested book order within my budget that are  a mix of recent Science Fiction, Fantasy, and History books?
+
+Agent Response: Certainly. Here’s a recommended bundle.
+ Project Hail Mary (2021): $28.99
+Circe (2018): $17.99
+On Tyranny (2017): $13.05
+
+Order Total: $60.03
+
+
+---
+
+_**Agent (model gemini-3-pro-preview, mode Agent)**_
+
+<tool-use data-tool-type="write" data-tool-name="write">
+
+<details><summary>Tool use: **write** • Edit file: tools/order_tools.py</summary>
+
+**Chunk 1**
+Lines added: 15, lines removed: 1
+
+```diff
+@@ -1,1 +1,15 @@
+- 
++ from langchain.tools import tool
++ 
++ @tool
++ def order_builder(budget: float, criteria: str) -&gt; str:
++     """
++     Useful for building a book order or bundle within a specific budget.
++     The tool selects a set of books that match the user's criteria (e.g., genre, recency, popularity)
++     while ensuring the total cost is within the provided budget.
++     It aims to maximize the total value of the order within the budget.
++     Input should be the budget amount and a description of the criteria.
++     """
++     # Placeholder logic
++     print(f"DEBUG: order_builder tool called with budget: {budget} and criteria: {criteria}")
++     return "Tool 'order_builder' was called successfully. (Real bundle building logic is not implemented yet)."
++ 
+```
+
+</details>
+
+</tool-use>
+
+---
+
+<tool-use data-tool-type="write" data-tool-name="search_replace">
+
+<details><summary>Tool use: **search_replace** • Edit file: agent.py</summary>
+
+**Chunk 1**
+Lines added: 1, lines removed: undefined
+
+```diff
+@@ -5,4 +5,5 @@
+  from tools.book_tools import answer_book_question
+  from tools.recommendation_tools import book_recommender
++ from tools.order_tools import order_builder
+  
+  # Load environment variables
+```
+
+**Chunk 2**
+Lines added: 5, lines removed: 3
+
+```diff
+@@ -20,9 +21,11 @@
+              "You must adopt the persona of a proper, polite, and knowledgeable British concierge. "
+              "Speak with elegance, use British spelling (e.g., 'colour', 'favourite'), and be helpful and courteous at all times. "
+-             "If the user asks about multiple books, you must call the 'answer_book_question' tool separately for each book "
+-             "to ensure you have the correct details for all of them."
++             "If the user asks about multiple books *specifically by name*, you must call the 'answer_book_question' tool separately for each book. "
++             "However, if you are providing recommendations using 'book_recommender' or building an order with 'order_builder', "
++             "use the detailed information returned by those tools to describe the books. "
++             "Do NOT call 'answer_book_question' for books returned by the recommender or order builder, as those tools provide sufficient details."
+          )
+          
+-         tools = [answer_book_question, book_recommender]
++         tools = [answer_book_question, book_recommender, order_builder]
+          
+          agent = create_agent(
+```
+
+</details>
+
+</tool-use>
+
+---
+
+I have created the `order_builder` tool in `tools/order_tools.py` and added it to the agent in `agent.py`. I also updated the system prompt to prevent redundant tool calls when using the order builder.
+
+You can now test the tool definition:
+
+```bash
+python agent.py
+```
+
+Try asking: "I have a budget of $65. Can you create a suggested book order within my budget that are a mix of recent Science Fiction, Fantasy, and History books?"
+
+You should see `[I used the order_builder tool]` in the output.
 
 ---
 
